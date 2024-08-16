@@ -13,6 +13,11 @@ from langchain.chains import create_retrieval_chain
 import os
 import atexit
 import streamlit as st
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain.tools.retriever import create_retriever_tool
+from langchain.agents import create_tool_calling_agent
+from langchain.agents import AgentExecutor
+from langchain import hub
 
 
 load_dotenv(override=True)
@@ -87,11 +92,11 @@ else:
     os.environ["OPENAI_API_KEY"] = API_KEY
     
 
-    # LOAD
+    #LOADING FILE
     loader = DirectoryLoader(DATA_PATH)
     documents = TextLoader(file).load()
 
-    # SPLIT
+    # SPLITING FILE
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(documents)
     
@@ -99,34 +104,65 @@ else:
     # VECTORSTORE
     vectorstore = Chroma.from_documents(documents=splits, embedding=OpenAIEmbeddings(openai_api_key=API_KEY))
     retriever = vectorstore.as_retriever()
+    
+    
+    
 
-    # RAG
-    # retriever = vectorstore.as_retriever()
+    
     
     st.title("READ MY File📄")
-    system_prompt = (
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer "
-    "the question. If you don't know the answer, say that you "
-    "don't know. Use three sentences maximum and keep the "
-    "answer concise."
-    "\n\n"
-    "{context}"
-        )
+    # system_prompt = (
+    # "You are an assistant for question-answering tasks. "
+    # "Use the following pieces of retrieved context to answer "
+    # "the question. If you don't know the answer, say that you "
+    # "don't know. Use three sentences maximum and keep the "
+    # "answer concise."
+    # "\n\n"
+    # "{context}"
+    #     )
     
-    prompt = ChatPromptTemplate.from_messages(
-        [
-        ("system", system_prompt),
-        ("human", "{input}"),
-        ]
-        )
+    # prompt = ChatPromptTemplate.from_messages(
+    #     [
+    #     ("system", system_prompt),
+    #     ("human", "{input}"),
+    #     ]
+    #     )
+    # llm = ChatOpenAI(
+    # model="gpt-3.5-turbo",
+    # temperature=0.5,
+    # api_key=API_KEY
+    # )
+    # qa_chain=create_stuff_documents_chain(llm, prompt)
+    # rag_chain = create_retrieval_chain(retriever, qa_chain)
+    
+    tavily_search = TavilySearchResults(
+    max_results=5,
+    search_depth="advanced",
+    )
+
+    retriever_tool = create_retriever_tool(
+        retriever,
+        'text_retreiver',
+        "Give answer based on the file",
+    )
+    # prompt = hub.pull("bhargavnimalkar/rag2")
+    prompt = hub.pull("hwchase17/openai-functions-agent")
+
     llm = ChatOpenAI(
     model="gpt-3.5-turbo",
     temperature=0.5,
     api_key=API_KEY
     )
-    qa_chain=create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, qa_chain)
+    
+    
+    tools = [retriever_tool, tavily_search]
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+    
+    
+    result = agent_executor.invoke({"input": 'who is messi?'}) 
+    # result['output'] 
+
     
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -141,6 +177,7 @@ else:
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            response = rag_chain.invoke({"input": prompt})['answer']
+            # response = rag_chain.invoke({"input": prompt})['answer']
+            response =  agent_executor.invoke({"input": prompt})['output'] 
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
